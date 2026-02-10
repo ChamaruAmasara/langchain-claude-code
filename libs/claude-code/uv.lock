@@ -596,7 +596,7 @@ wheels = [
 ]
 
 [[package]]
-name = "langchain-claude-code"
+name = "langchain-claude-code-cli"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

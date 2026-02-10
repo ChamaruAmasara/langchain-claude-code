@@ -441,6 +441,66 @@ llm.with_structured_output(MySchema)
 prompt | llm | parser  # chains work identically
 ```
 
+## ⚖️ Legal & Terms of Service
+
+> **Disclaimer:** This is a community project and is **not affiliated with, endorsed by, or sponsored by Anthropic**. Users are responsible for ensuring their usage complies with all applicable Anthropic terms and policies.
+
+### How This Package Works
+
+This package uses the official [`claude-code-sdk`](https://pypi.org/project/claude-code-sdk/) (MIT licensed, published by Anthropic) to interface with the Claude Code CLI. It does **not** reverse-engineer, decompile, or bypass any Anthropic systems. It uses the documented, officially supported SDK interface.
+
+### Applicable Terms
+
+Your use of Claude Code through this package is governed by Anthropic's terms:
+
+| Subscription | Applicable Terms |
+|-------------|-----------------|
+| Pro / Max (consumer) | [Consumer Terms of Service](https://www.anthropic.com/legal/consumer-terms) |
+| API key users | [Commercial Terms of Service](https://www.anthropic.com/legal/commercial-terms) |
+| All users | [Acceptable Use Policy](https://www.anthropic.com/legal/aup) |
+
+See also: [Claude Code Legal & Compliance](https://code.claude.com/docs/en/legal-and-compliance)
+
+### Key Terms to Be Aware Of
+
+**Consumer Terms (Pro/Max subscribers):**
+
+- **Automated access:** The Consumer Terms generally prohibit accessing Services "through automated or non-human means, whether through a bot, script, or otherwise" — **except** "via an Anthropic API Key or where we otherwise explicitly permit it." Anthropic publishes and maintains `claude-code-sdk` specifically for programmatic access, which we believe constitutes explicit permission for SDK-based usage.
+- **Non-compete:** You may not use the Services "to develop any products or services that compete with our Services, including to develop or train any artificial intelligence or machine learning algorithms or models or **resell the Services**."
+- **Personal use:** Consumer subscriptions are intended for individual use. You may not share your account credentials or make your account available to others.
+- **Model training:** Using Inputs/Outputs to train AI models ("model scraping" or "model distillation") is prohibited without prior Anthropic authorization.
+
+**Commercial Terms (API key users):**
+
+- More permissive — explicitly allows powering products and services for your own customers and end users.
+- Anthropic "may not train models on Customer Content from Services."
+
+### ⚠️ Gray Areas & Recommendations
+
+| Use Case | Risk Level | Notes |
+|----------|-----------|-------|
+| Personal development with Pro/Max | ✅ Low | Standard intended use of Claude Code |
+| Building internal tools with Pro/Max | ⚠️ Medium | Consumer terms are ambiguous on commercial use |
+| Powering a product for end users with Pro/Max | ⚠️ High | Consumer terms prohibit reselling; consider using an API key instead |
+| Using with an Anthropic API key | ✅ Low | Commercial terms explicitly allow this |
+| Building a competing AI service | 🚫 Prohibited | Explicitly prohibited under both Consumer and Commercial terms |
+| Training models on outputs | 🚫 Prohibited | Prohibited without Anthropic authorization |
+
+**Our recommendation:** If you're building anything beyond personal/internal use, use an Anthropic API key with the [Commercial Terms](https://www.anthropic.com/legal/commercial-terms) rather than relying on a consumer Pro/Max subscription. The Commercial Terms are designed for this purpose.
+
+### Rate Limits & Fair Use
+
+Claude Pro/Max subscriptions have usage limits that are subject to change. Heavy automated usage through this package counts against your subscription limits and may trigger rate limiting. Anthropic may throttle, suspend, or terminate access for usage that violates their terms.
+
+### This Package's License vs. Anthropic's Terms
+
+- **This package** (`langchain-claude-code`): MIT licensed — you can freely use, modify, and distribute the package code itself.
+- **Claude Code CLI**: Proprietary (`© Anthropic PBC. All rights reserved.`) — subject to Anthropic's terms.
+- **`claude-code-sdk`**: MIT licensed — open source, published by Anthropic.
+- **Model outputs**: Subject to Anthropic's terms regarding Inputs/Outputs/Materials.
+
+The MIT license of this package does **not** override or modify Anthropic's terms for the underlying service.
+
 ## License
 
 MIT

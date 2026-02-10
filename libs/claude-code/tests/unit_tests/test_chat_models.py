@@ -22,6 +22,65 @@ from langchain_claude_code.chat_models import (
     _convert_messages,
     _tool_to_anthropic_schema,
 )
+from langchain_claude_code.tools import (
+    ALL_TOOLS,
+    NETWORK_TOOLS,
+    READ_ONLY_TOOLS,
+    SHELL_TOOLS,
+    WRITE_TOOLS,
+    ClaudeTool,
+    normalize_tools,
+)
+
+
+# ── ClaudeTool enum ──────────────────────────────────────────
+
+
+class TestClaudeTool:
+    def test_enum_values(self) -> None:
+        assert ClaudeTool.BASH.value == "Bash"
+        assert ClaudeTool.READ.value == "Read"
+        assert ClaudeTool.WEB_FETCH.value == "WebFetch"
+
+    def test_string_subclass(self) -> None:
+        assert isinstance(ClaudeTool.BASH, str)
+        assert ClaudeTool.BASH == "Bash"
+
+    def test_preset_groups(self) -> None:
+        assert ClaudeTool.READ in READ_ONLY_TOOLS
+        assert ClaudeTool.GLOB in READ_ONLY_TOOLS
+        assert ClaudeTool.GREP in READ_ONLY_TOOLS
+        assert ClaudeTool.EDIT in WRITE_TOOLS
+        assert ClaudeTool.WRITE in WRITE_TOOLS
+        assert ClaudeTool.WEB_FETCH in NETWORK_TOOLS
+        assert ClaudeTool.WEB_SEARCH in NETWORK_TOOLS
+        assert ClaudeTool.BASH in SHELL_TOOLS
+        assert len(ALL_TOOLS) == len(ClaudeTool)
+
+    def test_all_tools_contains_all_enum_members(self) -> None:
+        for member in ClaudeTool:
+            assert member in ALL_TOOLS
+
+
+class TestNormalizeTools:
+    def test_strings(self) -> None:
+        result = normalize_tools(["Read", "Write", "Read"])
+        assert result == ["Read", "Write"]
+
+    def test_enum_values(self) -> None:
+        result = normalize_tools([ClaudeTool.READ, ClaudeTool.WRITE])
+        assert result == ["Read", "Write"]
+
+    def test_mixed(self) -> None:
+        result = normalize_tools([ClaudeTool.READ, "Write", ClaudeTool.READ])
+        assert result == ["Read", "Write"]
+
+    def test_empty(self) -> None:
+        assert normalize_tools([]) == []
+
+    def test_preserves_order(self) -> None:
+        result = normalize_tools([ClaudeTool.WRITE, ClaudeTool.READ, ClaudeTool.BASH])
+        assert result == ["Write", "Read", "Bash"]
 
 
 # ── _content_to_anthropic_blocks ─────────────────────────────
@@ -70,7 +129,6 @@ class TestContentToAnthropicBlocks:
         }]
 
     def test_image_url_as_string(self) -> None:
-        """image_url value can be a plain string instead of a dict."""
         result = _content_to_anthropic_blocks([
             {"type": "image_url", "image_url": "https://example.com/photo.png"},
         ])
@@ -183,7 +241,6 @@ class TestConvertMessages:
             )
         ]
         _, api_msgs, _ = _convert_messages(msgs)
-        # Empty content should not add a text block
         assert len(api_msgs[0]["content"]) == 1
         assert api_msgs[0]["content"][0]["type"] == "tool_use"
 
@@ -199,8 +256,6 @@ class TestConvertMessages:
         assert api_msgs[0]["content"][0]["content"] == "25°C, sunny"
 
     def test_unknown_message_type(self) -> None:
-        """Unknown message types should be treated as user messages."""
-
         class CustomMessage(BaseMessage):
             type: str = "custom"
 
@@ -218,7 +273,6 @@ class TestConvertMessages:
         assert system == "Second"
 
     def test_full_tool_calling_conversation(self) -> None:
-        """Test a complete tool-calling conversation flow."""
         msgs = [
             SystemMessage(content="You are helpful."),
             HumanMessage(content="What's the weather in Tokyo?"),
@@ -245,7 +299,7 @@ class TestBuildPromptString:
 
     def test_single_message_non_string(self) -> None:
         result = _build_prompt_string([{"role": "user", "content": [{"type": "text", "text": "hi"}]}])
-        assert "text" in result  # str() of the list
+        assert "text" in result
 
     def test_multi_turn(self) -> None:
         result = _build_prompt_string([
@@ -258,7 +312,6 @@ class TestBuildPromptString:
         assert "User: How are you?" in result
 
     def test_multi_turn_with_content_blocks(self) -> None:
-        # With multiple messages, content blocks get text extracted
         result = _build_prompt_string([
             {"role": "user", "content": [{"type": "text", "text": "hello"}, {"type": "text", "text": "world"}]},
             {"role": "assistant", "content": "ok"},
@@ -266,11 +319,9 @@ class TestBuildPromptString:
         assert "User: hello world" in result
 
     def test_single_message_content_blocks_uses_str(self) -> None:
-        # Single message with non-string content uses str()
         result = _build_prompt_string([
             {"role": "user", "content": [{"type": "text", "text": "hello"}]},
         ])
-        # str() of the list — this is the current behavior
         assert "hello" in result
 
 
@@ -320,6 +371,11 @@ class TestChatClaudeCodeProperties:
         assert llm.streaming is False
         assert llm.effort is None
         assert llm.thinking is None
+        assert llm.max_retries == 0
+        assert llm.default_request_timeout is None
+        assert llm.api_key is None
+        assert llm.anthropic_api_key is None
+        assert llm.session_id is None
 
     def test_identifying_params(self) -> None:
         llm = ChatClaudeCode(
@@ -374,6 +430,29 @@ class TestChatClaudeCodeProperties:
         assert llm.allowed_tools == ["Read", "Glob"]
         assert llm.disallowed_tools == ["Bash"]
 
+    def test_chatanthropic_compat_fields(self) -> None:
+        """ChatAnthropic compat fields are accepted without error."""
+        llm = ChatClaudeCode(
+            max_retries=3,
+            default_request_timeout=30.0,
+            api_key="sk-fake",
+            anthropic_api_key="sk-also-fake",
+        )
+        assert llm.max_retries == 3
+        assert llm.default_request_timeout == 30.0
+        assert llm.api_key == "sk-fake"
+        assert llm.anthropic_api_key == "sk-also-fake"
+
+    def test_allowed_tools_with_enum(self) -> None:
+        llm = ChatClaudeCode(
+            allowed_tools=[ClaudeTool.READ, ClaudeTool.GLOB, "Grep"],
+        )
+        assert len(llm.allowed_tools) == 3
+
+    def test_last_result_initially_none(self) -> None:
+        llm = ChatClaudeCode()
+        assert llm.last_result is None
+
 
 # ── bind_tools ───────────────────────────────────────────────
 
@@ -384,7 +463,6 @@ class TestBindTools:
         tool = {"name": "test", "description": "test tool", "input_schema": {"type": "object"}}
         bound = llm.bind_tools([tool])
         assert bound._bound_tools == [tool]
-        # Original should be unmodified
         assert llm._bound_tools is None
 
     def test_bind_pydantic_tools(self) -> None:
@@ -412,6 +490,85 @@ class TestBindTools:
         ]
         bound = llm.bind_tools(tools)
         assert len(bound._bound_tools) == 2
+
+    def test_bind_tools_accepts_extra_kwargs(self) -> None:
+        """Signature matches ChatAnthropic — extra kwargs accepted."""
+        llm = ChatClaudeCode()
+        bound = llm.bind_tools(
+            [{"name": "t", "description": "", "input_schema": {}}],
+            tool_choice="auto",
+            parallel_tool_calls=True,
+            strict=True,
+        )
+        assert bound._bound_tools is not None
+
+
+# ── enable_tools ─────────────────────────────────────────────
+
+
+class TestEnableTools:
+    def test_enable_tools_adds_to_empty(self) -> None:
+        llm = ChatClaudeCode()
+        new = llm.enable_tools([ClaudeTool.READ, ClaudeTool.GLOB])
+        assert new.allowed_tools == [ClaudeTool.READ, ClaudeTool.GLOB]
+        assert llm.allowed_tools is None  # original unchanged
+
+    def test_enable_tools_adds_to_existing(self) -> None:
+        llm = ChatClaudeCode(allowed_tools=["Read"])
+        new = llm.enable_tools([ClaudeTool.WRITE])
+        assert len(new.allowed_tools) == 2
+
+    def test_enable_tools_with_strings(self) -> None:
+        llm = ChatClaudeCode()
+        new = llm.enable_tools(["Bash", "Write"])
+        assert new.allowed_tools == ["Bash", "Write"]
+
+    def test_enable_tools_with_preset_group(self) -> None:
+        llm = ChatClaudeCode()
+        new = llm.enable_tools(READ_ONLY_TOOLS)
+        assert len(new.allowed_tools) == 3
+
+
+# ── session_id ───────────────────────────────────────────────
+
+
+class TestSessionId:
+    def test_session_id_field(self) -> None:
+        llm = ChatClaudeCode(session_id="test-session-123")
+        assert llm.session_id == "test-session-123"
+
+    def test_get_session_id_from_field(self) -> None:
+        llm = ChatClaudeCode(session_id="field-session")
+        assert llm._get_session_id() == "field-session"
+
+    def test_get_session_id_from_config(self) -> None:
+        llm = ChatClaudeCode(session_id="field-session")
+        config: RunnableConfig = {"configurable": {"session_id": "config-session"}}
+        assert llm._get_session_id(config) == "config-session"
+
+    def test_get_session_id_config_overrides_field(self) -> None:
+        llm = ChatClaudeCode(session_id="field")
+        config: RunnableConfig = {"configurable": {"session_id": "config"}}
+        assert llm._get_session_id(config) == "config"
+
+    def test_get_session_id_empty_config(self) -> None:
+        llm = ChatClaudeCode(session_id="field")
+        config: RunnableConfig = {"configurable": {}}
+        assert llm._get_session_id(config) == "field"
+
+    def test_get_session_id_no_config_no_field(self) -> None:
+        llm = ChatClaudeCode()
+        assert llm._get_session_id() is None
+
+    def test_session_id_in_build_options(self) -> None:
+        llm = ChatClaudeCode()
+        options = llm._build_options(session_id="resume-123")
+        assert options.resume == "resume-123"
+
+    def test_no_session_id_no_resume(self) -> None:
+        llm = ChatClaudeCode()
+        options = llm._build_options()
+        assert not hasattr(options, "resume") or options.resume is None
 
 
 # ── _build_options ───────────────────────────────────────────
@@ -447,6 +604,11 @@ class TestBuildOptions:
 
     def test_allowed_tools(self) -> None:
         llm = ChatClaudeCode(allowed_tools=["Read", "Glob"])
+        options = llm._build_options()
+        assert options.allowed_tools == ["Read", "Glob"]
+
+    def test_allowed_tools_with_enum(self) -> None:
+        llm = ChatClaudeCode(allowed_tools=[ClaudeTool.READ, ClaudeTool.GLOB])
         options = llm._build_options()
         assert options.allowed_tools == ["Read", "Glob"]
 
@@ -532,51 +694,88 @@ class TestGenerate:
         block = MagicMock()
         block.text = text
         block.thinking = None
-        del block.thinking  # so hasattr returns False
+        del block.thinking
         msg = MagicMock()
         msg.content = [block]
         return msg
 
-    @patch("langchain_claude_code.chat_models.ChatClaudeCode._run_async")
-    def test_generate_basic(self, mock_run_async: MagicMock) -> None:
+    @patch("langchain_claude_code.chat_models._run_sync")
+    def test_generate_basic(self, mock_run_sync: MagicMock) -> None:
         """Test _generate returns ChatResult with AIMessage."""
         llm = ChatClaudeCode()
-
-        def side_effect(coro: object) -> None:
-            # Simulate what _run_async does — but we need to populate text_parts
-            pass
-
-        mock_run_async.side_effect = side_effect
-
-        # We can't easily test the full async flow without the SDK,
-        # but we can test the structure
+        mock_run_sync.side_effect = lambda coro: None
         result = llm._generate([HumanMessage(content="Hello")])
         assert isinstance(result, ChatResult)
         assert len(result.generations) == 1
         assert isinstance(result.generations[0].message, AIMessage)
 
-    @patch("langchain_claude_code.chat_models.ChatClaudeCode._run_async")
-    def test_generate_with_tools_injects_system_prompt(self, mock_run_async: MagicMock) -> None:
+    @patch("langchain_claude_code.chat_models._run_sync")
+    def test_generate_with_tools_injects_system_prompt(self, mock_run_sync: MagicMock) -> None:
         llm = ChatClaudeCode()
         bound = llm.bind_tools([{"name": "test_tool", "description": "A test", "input_schema": {}}])
-
-        captured_options = {}
-
-        def capture_run(coro: object) -> None:
-            pass
-
-        mock_run_async.side_effect = capture_run
+        mock_run_sync.side_effect = lambda coro: None
         result = bound._generate([HumanMessage(content="Use the tool")])
         assert isinstance(result, ChatResult)
 
-    @patch("langchain_claude_code.chat_models.ChatClaudeCode._run_async")
-    def test_generate_generation_info(self, mock_run_async: MagicMock) -> None:
+    @patch("langchain_claude_code.chat_models._run_sync")
+    def test_generate_generation_info(self, mock_run_sync: MagicMock) -> None:
         llm = ChatClaudeCode(model="claude-opus-4-20250514")
-        mock_run_async.side_effect = lambda c: None
+        mock_run_sync.side_effect = lambda c: None
         result = llm._generate([HumanMessage(content="Hi")])
         gen_info = result.generations[0].generation_info
         assert gen_info["model"] == "claude-opus-4-20250514"
         assert gen_info["backend"] == "cli"
+
+
+# ── last_result ──────────────────────────────────────────────
+
+
+class TestLastResult:
+    def test_last_result_stored(self) -> None:
+        """Verify _last_result is set when _process_sdk_messages gets a ResultMessage."""
+        llm = ChatClaudeCode()
+
+        # Create a mock ResultMessage
+        mock_result = MagicMock()
+        mock_result.__class__.__name__ = "ResultMessage"
+        mock_result.session_id = "sess-abc"
+        mock_result.duration_ms = 1234
+        mock_result.num_turns = 2
+        mock_result.is_error = False
+        mock_result.total_cost_usd = 0.05
+        mock_result.usage = {"input_tokens": 100, "output_tokens": 50}
+
+        # Patch isinstance check
+        from claude_code_sdk import AssistantMessage, ResultMessage
+
+        mock_assistant = MagicMock(spec=AssistantMessage)
+        block = MagicMock()
+        block.text = "Hello!"
+        del_attrs = ["thinking"]
+        for attr in del_attrs:
+            if hasattr(block, attr):
+                delattr(block, attr)
+        mock_assistant.content = [block]
+
+        real_result = ResultMessage(
+            subtype="result",
+            duration_ms=1234,
+            duration_api_ms=1000,
+            is_error=False,
+            num_turns=2,
+            session_id="sess-abc",
+            total_cost_usd=0.05,
+            usage={"input_tokens": 100, "output_tokens": 50},
+            result="Hello!",
+        )
+
+        text, _, gen_info = llm._process_sdk_messages([mock_assistant, real_result])
+        assert text == "Hello!"
+        assert llm.last_result is not None
+        assert llm.last_result.session_id == "sess-abc"
+        assert gen_info["session_id"] == "sess-abc"
+        assert gen_info["total_cost_usd"] == 0.05
+        assert gen_info["usage"] == {"input_tokens": 100, "output_tokens": 50}
 
 
 # ── Serialization / model_copy ───────────────────────────────
@@ -625,6 +824,5 @@ class TestEdgeCases:
 
     def test_image_url_missing_url(self) -> None:
         result = _content_to_anthropic_blocks([{"type": "image_url", "image_url": {}}])
-        # Empty URL should be treated as http (not data:), producing a URL source
         assert result[0]["source"]["type"] == "url"
         assert result[0]["source"]["url"] == ""

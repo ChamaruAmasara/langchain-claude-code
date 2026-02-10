@@ -118,11 +118,7 @@ jobs:
           uv venv
           VIRTUAL_ENV=.venv uv pip install dist/*.whl
 
-          # Replace all dashes in the package name with underscores,
-          # since that's how Python imports packages with dashes in the name.
-          IMPORT_NAME="$(echo "$PKG_NAME" | sed s/-/_/g)"
-
-          uv run python -c "import $IMPORT_NAME; print(dir($IMPORT_NAME))"
+          uv run python -c "import langchain_claude_code; print(dir(langchain_claude_code))"
 
       - name: Import test dependencies
         run: uv sync --group test

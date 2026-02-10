@@ -1,0 +1,131 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "langchain-claude-code"
+description = "LangChain ChatModel using Claude Code CLI - use your Claude Pro/Max subscription, no API key needed"
+license = {text = "MIT"}
+readme = "README.md"
+authors = [
+    { name = "Chamaru Amasara", email = "chamaru@donely.ai" },
+]
+version = "0.1.0"
+requires-python = ">=3.10"
+keywords = ["langchain", "claude", "anthropic", "claude-code"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "langchain-core>=0.3.0,<2.0.0",
+    "claude-code-sdk>=0.0.20",
+]
+
+[project.urls]
+Homepage = "https://github.com/ChamaruAmasara/langchain-claude-code"
+Source = "https://github.com/ChamaruAmasara/langchain-claude-code/tree/main/libs/claude-code"
+Issues = "https://github.com/ChamaruAmasara/langchain-claude-code/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["langchain_claude_code"]
+
+[dependency-groups]
+lint = ["ruff>=0.13.1,<0.16.0"]
+typing = [
+    "mypy>=1.18.1,<1.20.0",
+]
+test = [
+    "pytest>=8.4.0,<10.0.0",
+    "pytest-asyncio>=0.21.0,<2.0.0",
+    "pytest-socket>=0.7.0,<1.0.0",
+    "syrupy>=4.9.0,<6.0.0",
+    "langchain-tests>=1.1.2,<2.0.0",
+]
+test_integration = [
+    "pytest>=8.4.0,<10.0.0",
+]
+
+[tool.ruff]
+fix = true
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "C90",
+    "COM812",
+    "CPY",
+    "FIX002",
+    "ISC001",
+    "PERF203",
+    "PLR09",
+    "RUF012",
+    "TC001",
+    "TC002",
+    "TC003",
+    "TD002",
+    "TD003",
+    "ANN401",
+    "BLE",
+    "DOC",
+    "ERA",
+    "PLR2004",
+    "PLC0415",
+    "SIM117",
+    "FBT",
+    "PT",
+    "ARG",
+    "SLF",
+    "D",
+    "G",
+    "S",
+    "A",
+    "N",
+    "TRY",
+    "B",
+    "PLW",
+]
+unfixable = [
+    "B028",
+    "PLW1510",
+]
+
+pydocstyle.convention = "google"
+pydocstyle.ignore-var-parameters = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D1", "S", "SLF", "ARG001", "PGH003", "PT011"]
+"scripts/**" = ["INP", "S"]
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+strict = true
+disallow_untyped_defs = true
+disallow_any_generics = false
+warn_return_any = false
+
+[tool.coverage.run]
+omit = [
+    "tests/*",
+    "*/site-packages/*",
+    "*/.venv/*",
+    "*/venv/*",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "requires: mark tests as requiring a specific library",
+    "asyncio: mark tests as requiring asyncio",
+    "compile: mark placeholder test used to compile integration tests without running them",
+]
+asyncio_mode = "auto"

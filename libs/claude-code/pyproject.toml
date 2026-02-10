@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "langchain-claude-code"
+name = "langchain-claude-code-cli"
 description = "LangChain ChatModel using Claude Code CLI - use your Claude Pro/Max subscription, no API key needed"
 license = {text = "MIT"}
 readme = "README.md"

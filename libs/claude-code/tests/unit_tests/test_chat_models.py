@@ -11,6 +11,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.outputs import ChatResult
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
 from langchain_claude_code.chat_models import (
@@ -102,37 +103,65 @@ class TestContentToAnthropicBlocks:
         assert result == [{"type": "text", "text": "hi"}]
 
     def test_image_url_base64(self) -> None:
-        result = _content_to_anthropic_blocks([
-            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc123"}},
-        ])
-        assert result == [{
-            "type": "image",
-            "source": {"type": "base64", "media_type": "image/png", "data": "abc123"},
-        }]
+        result = _content_to_anthropic_blocks(
+            [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,abc123"},
+                },
+            ]
+        )
+        assert result == [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": "abc123",
+                },
+            }
+        ]
 
     def test_image_url_base64_jpeg(self) -> None:
-        result = _content_to_anthropic_blocks([
-            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,xyz"}},
-        ])
+        result = _content_to_anthropic_blocks(
+            [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/jpeg;base64,xyz"},
+                },
+            ]
+        )
         assert result[0]["source"]["media_type"] == "image/jpeg"
 
     def test_image_url_http(self) -> None:
-        result = _content_to_anthropic_blocks([
-            {"type": "image_url", "image_url": {"url": "https://example.com/img.jpg"}},
-        ])
-        assert result == [{
-            "type": "image",
-            "source": {"type": "url", "url": "https://example.com/img.jpg"},
-        }]
+        result = _content_to_anthropic_blocks(
+            [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "https://example.com/img.jpg"},
+                },
+            ]
+        )
+        assert result == [
+            {
+                "type": "image",
+                "source": {"type": "url", "url": "https://example.com/img.jpg"},
+            }
+        ]
 
     def test_image_url_as_string(self) -> None:
-        result = _content_to_anthropic_blocks([
-            {"type": "image_url", "image_url": "https://example.com/photo.png"},
-        ])
+        result = _content_to_anthropic_blocks(
+            [
+                {"type": "image_url", "image_url": "https://example.com/photo.png"},
+            ]
+        )
         assert result[0]["source"]["url"] == "https://example.com/photo.png"
 
     def test_image_block_passthrough(self) -> None:
-        block = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "x"}}
+        block = {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": "x"},
+        }
         result = _content_to_anthropic_blocks([block])
         assert result == [block]
 
@@ -145,11 +174,16 @@ class TestContentToAnthropicBlocks:
         assert result == [{"type": "text", "text": "123"}]
 
     def test_mixed_content(self) -> None:
-        result = _content_to_anthropic_blocks([
-            {"type": "text", "text": "Look at this:"},
-            {"type": "image_url", "image_url": {"url": "https://example.com/img.jpg"}},
-            "and this text",
-        ])
+        result = _content_to_anthropic_blocks(
+            [
+                {"type": "text", "text": "Look at this:"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "https://example.com/img.jpg"},
+                },
+                "and this text",
+            ]
+        )
         assert len(result) == 3
         assert result[0]["type"] == "text"
         assert result[1]["type"] == "image"
@@ -184,12 +218,17 @@ class TestConvertMessages:
 
     def test_multimodal_image(self) -> None:
         msgs = [
-            HumanMessage(content=[
-                {"type": "text", "text": "What is this?"},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc123"}},
-            ])
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": "What is this?"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,abc123"},
+                    },
+                ]
+            )
         ]
-        system, api_msgs, has_multimodal = _convert_messages(msgs)
+        _system, api_msgs, has_multimodal = _convert_messages(msgs)
         assert has_multimodal is True
         content = api_msgs[0]["content"]
         assert isinstance(content, list)
@@ -199,10 +238,12 @@ class TestConvertMessages:
 
     def test_image_url_string(self) -> None:
         msgs = [
-            HumanMessage(content=[
-                {"type": "text", "text": "Describe"},
-                {"type": "image_url", "image_url": "https://example.com/img.jpg"},
-            ])
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": "Describe"},
+                    {"type": "image_url", "image_url": "https://example.com/img.jpg"},
+                ]
+            )
         ]
         _, api_msgs, has_multimodal = _convert_messages(msgs)
         assert has_multimodal is True
@@ -212,11 +253,13 @@ class TestConvertMessages:
         msgs = [
             AIMessage(
                 content="I'll check the weather.",
-                tool_calls=[{
-                    "id": "call_123",
-                    "name": "get_weather",
-                    "args": {"city": "Tokyo"},
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_123",
+                        "name": "get_weather",
+                        "args": {"city": "Tokyo"},
+                    }
+                ],
             )
         ]
         _, api_msgs, has_multimodal = _convert_messages(msgs)
@@ -275,7 +318,9 @@ class TestConvertMessages:
             HumanMessage(content="What's the weather in Tokyo?"),
             AIMessage(
                 content="Let me check.",
-                tool_calls=[{"id": "call_1", "name": "get_weather", "args": {"city": "Tokyo"}}],
+                tool_calls=[
+                    {"id": "call_1", "name": "get_weather", "args": {"city": "Tokyo"}}
+                ],
             ),
             ToolMessage(content="25°C, sunny", tool_call_id="call_1"),
             AIMessage(content="It's 25°C and sunny in Tokyo!"),
@@ -295,30 +340,44 @@ class TestBuildPromptString:
         assert result == "Hello"
 
     def test_single_message_non_string(self) -> None:
-        result = _build_prompt_string([{"role": "user", "content": [{"type": "text", "text": "hi"}]}])
+        result = _build_prompt_string(
+            [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
+        )
         assert "text" in result
 
     def test_multi_turn(self) -> None:
-        result = _build_prompt_string([
-            {"role": "user", "content": "Hi"},
-            {"role": "assistant", "content": "Hello!"},
-            {"role": "user", "content": "How are you?"},
-        ])
+        result = _build_prompt_string(
+            [
+                {"role": "user", "content": "Hi"},
+                {"role": "assistant", "content": "Hello!"},
+                {"role": "user", "content": "How are you?"},
+            ]
+        )
         assert "User: Hi" in result
         assert "Assistant: Hello!" in result
         assert "User: How are you?" in result
 
     def test_multi_turn_with_content_blocks(self) -> None:
-        result = _build_prompt_string([
-            {"role": "user", "content": [{"type": "text", "text": "hello"}, {"type": "text", "text": "world"}]},
-            {"role": "assistant", "content": "ok"},
-        ])
+        result = _build_prompt_string(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "hello"},
+                        {"type": "text", "text": "world"},
+                    ],
+                },
+                {"role": "assistant", "content": "ok"},
+            ]
+        )
         assert "User: hello world" in result
 
     def test_single_message_content_blocks_uses_str(self) -> None:
-        result = _build_prompt_string([
-            {"role": "user", "content": [{"type": "text", "text": "hello"}]},
-        ])
+        result = _build_prompt_string(
+            [
+                {"role": "user", "content": [{"type": "text", "text": "hello"}]},
+            ]
+        )
         assert "hello" in result
 
 
@@ -333,6 +392,7 @@ class TestToolToAnthropicSchema:
     def test_pydantic_model(self) -> None:
         class MyTool(BaseModel):
             """A helpful tool."""
+
             x: int = Field(description="A number")
 
         result = _tool_to_anthropic_schema(MyTool)
@@ -457,7 +517,11 @@ class TestChatClaudeCodeProperties:
 class TestBindTools:
     def test_bind_dict_tools(self) -> None:
         llm = ChatClaudeCode()
-        tool = {"name": "test", "description": "test tool", "input_schema": {"type": "object"}}
+        tool = {
+            "name": "test",
+            "description": "test tool",
+            "input_schema": {"type": "object"},
+        }
         bound = llm.bind_tools([tool])
         assert bound._bound_tools == [tool]
         assert llm._bound_tools is None
@@ -465,6 +529,7 @@ class TestBindTools:
     def test_bind_pydantic_tools(self) -> None:
         class WeatherInput(BaseModel):
             """Get weather for a city."""
+
             city: str
 
         llm = ChatClaudeCode()
@@ -636,27 +701,38 @@ class TestBuildOptions:
 class TestBuildPrompt:
     def test_text_only_prompt(self) -> None:
         llm = ChatClaudeCode()
-        prompt, options, is_streaming = llm._build_prompt([HumanMessage(content="Hello")])
+        prompt, _options, is_streaming = llm._build_prompt(
+            [HumanMessage(content="Hello")]
+        )
         assert isinstance(prompt, str)
         assert prompt == "Hello"
         assert is_streaming is False
 
     def test_system_message_sets_option(self) -> None:
         llm = ChatClaudeCode()
-        _, options, _ = llm._build_prompt([
-            SystemMessage(content="Be helpful."),
-            HumanMessage(content="Hi"),
-        ])
+        _, options, _ = llm._build_prompt(
+            [
+                SystemMessage(content="Be helpful."),
+                HumanMessage(content="Hi"),
+            ]
+        )
         assert options.system_prompt == "Be helpful."
 
     def test_multimodal_returns_list(self) -> None:
         llm = ChatClaudeCode()
-        prompt, _, is_streaming = llm._build_prompt([
-            HumanMessage(content=[
-                {"type": "text", "text": "What's this?"},
-                {"type": "image_url", "image_url": {"url": "https://example.com/img.jpg"}},
-            ])
-        ])
+        prompt, _, is_streaming = llm._build_prompt(
+            [
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": "What's this?"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "https://example.com/img.jpg"},
+                        },
+                    ]
+                )
+            ]
+        )
         assert isinstance(prompt, list)
         assert is_streaming is True
 
@@ -673,11 +749,13 @@ class TestBuildPrompt:
 
     def test_multi_turn_conversation_prompt(self) -> None:
         llm = ChatClaudeCode()
-        prompt, _, _ = llm._build_prompt([
-            HumanMessage(content="Hi"),
-            AIMessage(content="Hello!"),
-            HumanMessage(content="How are you?"),
-        ])
+        prompt, _, _ = llm._build_prompt(
+            [
+                HumanMessage(content="Hi"),
+                AIMessage(content="Hello!"),
+                HumanMessage(content="How are you?"),
+            ]
+        )
         assert "User: Hi" in prompt
         assert "Assistant: Hello!" in prompt
         assert "User: How are you?" in prompt
@@ -707,9 +785,13 @@ class TestGenerate:
         assert isinstance(result.generations[0].message, AIMessage)
 
     @patch("langchain_claude_code.chat_models._run_sync")
-    def test_generate_with_tools_injects_system_prompt(self, mock_run_sync: MagicMock) -> None:
+    def test_generate_with_tools_injects_system_prompt(
+        self, mock_run_sync: MagicMock
+    ) -> None:
         llm = ChatClaudeCode()
-        bound = llm.bind_tools([{"name": "test_tool", "description": "A test", "input_schema": {}}])
+        bound = llm.bind_tools(
+            [{"name": "test_tool", "description": "A test", "input_schema": {}}]
+        )
         mock_run_sync.side_effect = lambda coro: None
         result = bound._generate([HumanMessage(content="Use the tool")])
         assert isinstance(result, ChatResult)
@@ -729,7 +811,7 @@ class TestGenerate:
 
 class TestLastResult:
     def test_last_result_stored(self) -> None:
-        """Verify _last_result is set when _process_sdk_messages gets a ResultMessage."""
+        """Verify _last_result is set via _process_sdk_messages."""
         llm = ChatClaudeCode()
 
         # Create a mock ResultMessage
@@ -869,11 +951,13 @@ class TestLangGraphCompat:
             HumanMessage(content="What's the weather?"),
             AIMessage(
                 content="",
-                tool_calls=[{
-                    "id": "call_abc",
-                    "name": "get_weather",
-                    "args": {"city": "London"},
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_abc",
+                        "name": "get_weather",
+                        "args": {"city": "London"},
+                    }
+                ],
             ),
             ToolMessage(
                 content='{"temp": 15, "condition": "cloudy"}',
@@ -895,11 +979,13 @@ class TestLangGraphCompat:
             HumanMessage(content="Search for LangGraph docs"),
             AIMessage(
                 content="I'll search for that.",
-                tool_calls=[{
-                    "id": "call_1",
-                    "name": "search",
-                    "args": {"q": "langgraph docs"},
-                }],
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "name": "search",
+                        "args": {"q": "langgraph docs"},
+                    }
+                ],
             ),
             ToolMessage(
                 content="Found: https://langchain-ai.github.io/langgraph/",
@@ -917,9 +1003,7 @@ class TestLangGraphCompat:
         assert api_msgs[3]["role"] == "assistant"
 
     @patch("langchain_claude_code.chat_models._run_sync")
-    def test_ai_message_tool_calls_populated(
-        self, mock_run_sync: MagicMock
-    ) -> None:
+    def test_ai_message_tool_calls_populated(self, mock_run_sync: MagicMock) -> None:
         """JSON tool_calls in response populates AIMessage."""
         from claude_code_sdk import (
             AssistantMessage,
@@ -931,9 +1015,7 @@ class TestLangGraphCompat:
             "args": {"city": "Paris"},
             "id": "call_42",
         }
-        tool_response = json.dumps(
-            {"tool_calls": [tc_data]}
-        )
+        tool_response = json.dumps({"tool_calls": [tc_data]})
 
         mock_assistant = MagicMock(spec=AssistantMessage)
         block = MagicMock()
@@ -969,9 +1051,7 @@ class TestLangGraphCompat:
 
         mock_run_sync.side_effect = lambda coro: None
 
-        text, _, _info = bound._process_sdk_messages(
-            collected_msgs
-        )
+        text, _, _info = bound._process_sdk_messages(collected_msgs)
         assert text == tool_response
 
         # Simulate parsing from _generate
@@ -990,9 +1070,7 @@ class TestLangGraphCompat:
                     }
                     for tc in parsed["tool_calls"]
                 ]
-                ai_msg = AIMessage(
-                    content=text, tool_calls=tool_calls
-                )
+                ai_msg = AIMessage(content=text, tool_calls=tool_calls)
 
         assert len(ai_msg.tool_calls) == 1
         assert ai_msg.tool_calls[0]["name"] == "get_weather"

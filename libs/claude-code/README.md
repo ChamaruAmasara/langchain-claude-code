@@ -5,7 +5,7 @@
 Uses the Claude Code CLI under the hood, so if you can run `claude`, you can use this.
 
 ```bash
-pip install langchain-claude-code
+pip install langchain-claude-code-cli
 ```
 
 ## Quick Start
@@ -80,7 +80,7 @@ npm install -g @anthropic-ai/claude-code
 claude auth login
 
 # 4. Install the package
-pip install langchain-claude-code
+pip install langchain-claude-code-cli
 ```
 
 > **Note:** On headless Linux servers, `claude auth login` will print a URL to open in your browser. Complete the OAuth flow there, and the CLI will store credentials locally.

@@ -109,7 +109,7 @@ pydocstyle.ignore-var-parameters = true
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D1", "S", "SLF", "ARG001", "PGH003", "PT011"]
-"scripts/**" = ["INP", "S"]
+"scripts/**" = ["INP", "S", "T201"]
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]
@@ -117,6 +117,11 @@ strict = true
 disallow_untyped_defs = true
 disallow_any_generics = false
 warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disable_error_code = ["arg-type", "index", "comparison-overlap", "union-attr", "attr-defined"]
 
 [tool.coverage.run]
 omit = [

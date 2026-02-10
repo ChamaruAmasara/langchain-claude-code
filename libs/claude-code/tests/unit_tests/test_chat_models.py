@@ -89,7 +89,7 @@ class TestContentToAnthropicBlocks:
         assert _content_to_anthropic_blocks("hello") == "hello"
 
     def test_non_list_non_string(self) -> None:
-        assert _content_to_anthropic_blocks(42) == "42"  # type: ignore[arg-type]
+        assert _content_to_anthropic_blocks(42) == "42"
 
     def test_list_with_string_items(self) -> None:
         result = _content_to_anthropic_blocks(["hello", "world"])

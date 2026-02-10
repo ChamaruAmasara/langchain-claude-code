@@ -14,15 +14,10 @@ import asyncio
 import json
 import queue
 import threading
+from collections.abc import AsyncIterator, Iterator, Sequence
 from typing import (
     Any,
-    AsyncIterator,
-    Iterator,
-    List,
     Literal,
-    Optional,
-    Sequence,
-    Union,
 )
 
 from langchain_core.callbacks import (
@@ -43,11 +38,14 @@ from langchain_core.tools import BaseTool
 
 from langchain_claude_code.tools import ClaudeTool, normalize_tools
 
+_SDK_IMPORT_ERR = (
+    "claude-code-sdk is required. Install with: pip install claude-code-sdk"
+)
 
 # ── Message Conversion ───────────────────────────────────────
 
 
-def _content_to_anthropic_blocks(content: Union[str, list]) -> Union[str, list[dict]]:
+def _content_to_anthropic_blocks(content: str | list) -> str | list[dict]:
     """Convert LangChain message content to Anthropic content blocks.
 
     Handles text, image_url (base64 + URL), and direct Anthropic image blocks.
@@ -71,14 +69,16 @@ def _content_to_anthropic_blocks(content: Union[str, list]) -> Union[str, list[d
                 if url.startswith("data:"):
                     header, b64data = url.split(",", 1)
                     media_type = header.split(":")[1].split(";")[0]
-                    blocks.append({
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": b64data,
-                        },
-                    })
+                    blocks.append(
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": b64data,
+                            },
+                        }
+                    )
                 else:
                     blocks.append(
                         {"type": "image", "source": {"type": "url", "url": url}}
@@ -93,13 +93,13 @@ def _content_to_anthropic_blocks(content: Union[str, list]) -> Union[str, list[d
 
 
 def _convert_messages(
-    messages: List[BaseMessage],
-) -> tuple[Optional[str], list[dict], bool]:
+    messages: list[BaseMessage],
+) -> tuple[str | None, list[dict], bool]:
     """Convert LangChain messages → Anthropic API format.
 
     Returns (system_prompt, messages, has_multimodal).
     """
-    system: Optional[str] = None
+    system: str | None = None
     api_msgs: list[dict] = []
     has_multimodal = False
 
@@ -115,24 +115,20 @@ def _convert_messages(
             if msg.tool_calls:
                 content_blocks: list[dict] = []
                 if msg.content:
-                    content_blocks.append(
-                        {"type": "text", "text": str(msg.content)}
-                    )
-                for tc in msg.tool_calls:
-                    content_blocks.append(
-                        {
-                            "type": "tool_use",
-                            "id": tc["id"],
-                            "name": tc["name"],
-                            "input": tc["args"],
-                        }
-                    )
+                    content_blocks.append({"type": "text", "text": str(msg.content)})
+                content_blocks.extend(
+                    {
+                        "type": "tool_use",
+                        "id": tc["id"],
+                        "name": tc["name"],
+                        "input": tc["args"],
+                    }
+                    for tc in msg.tool_calls
+                )
                 api_msgs.append({"role": "assistant", "content": content_blocks})
                 has_multimodal = True
             else:
-                api_msgs.append(
-                    {"role": "assistant", "content": str(msg.content)}
-                )
+                api_msgs.append({"role": "assistant", "content": str(msg.content)})
         elif isinstance(msg, ToolMessage):
             api_msgs.append(
                 {
@@ -166,21 +162,17 @@ def _build_prompt_string(api_messages: list[dict]) -> str:
         if isinstance(content, str):
             parts.append(f"{role}: {content}")
         else:
-            texts = [
-                b.get("text", "") for b in content if b.get("type") == "text"
-            ]
+            texts = [b.get("text", "") for b in content if b.get("type") == "text"]
             parts.append(f"{role}: {' '.join(texts)}")
     return "\n\n".join(parts)
 
 
-def _tool_to_anthropic_schema(tool: Union[BaseTool, dict, type]) -> dict:
+def _tool_to_anthropic_schema(tool: BaseTool | dict | type) -> dict:
     """Convert a LangChain tool to Anthropic tool schema."""
     if isinstance(tool, dict):
         return tool
     if isinstance(tool, type):
-        schema = (
-            tool.model_json_schema() if hasattr(tool, "model_json_schema") else {}
-        )
+        schema = tool.model_json_schema() if hasattr(tool, "model_json_schema") else {}
         return {
             "name": tool.__name__,
             "description": tool.__doc__ or "",
@@ -225,8 +217,7 @@ def _run_sync(coro: Any) -> Any:
         if exc[0] is not None:
             raise exc[0]
         return result[0]
-    else:
-        return asyncio.run(coro)
+    return asyncio.run(coro)
 
 
 # ── Main ChatModel ───────────────────────────────────────────
@@ -284,7 +275,10 @@ class ChatClaudeCode(BaseChatModel):
             reader.invoke("Find all TODO comments in this project")
 
             # Session resume
-            result = llm.invoke("Start a project", config={"configurable": {"session_id": "abc123"}})
+            result = llm.invoke(
+                "Start a project",
+                config={"configurable": {"session_id": "abc123"}},
+            )
     """
 
     # ── Core params (ChatAnthropic-compatible) ───────────────
@@ -295,16 +289,16 @@ class ChatClaudeCode(BaseChatModel):
     max_tokens: int = 4096
     """Maximum tokens to generate."""
 
-    temperature: Optional[float] = None
+    temperature: float | None = None
     """Sampling temperature (0.0-1.0)."""
 
-    top_k: Optional[int] = None
+    top_k: int | None = None
     """Top-K sampling."""
 
-    top_p: Optional[float] = None
+    top_p: float | None = None
     """Nucleus sampling."""
 
-    stop_sequences: Optional[List[str]] = None
+    stop_sequences: list[str] | None = None
     """Stop sequences."""
 
     streaming: bool = False
@@ -315,59 +309,59 @@ class ChatClaudeCode(BaseChatModel):
     max_retries: int = 0
     """Accepted for ChatAnthropic compat. CLI doesn't retry; this is a no-op."""
 
-    default_request_timeout: Optional[float] = None
+    default_request_timeout: float | None = None
     """Accepted for ChatAnthropic compat. Not fully supported via CLI."""
 
-    api_key: Optional[str] = None
-    """Accepted for drop-in compat with ChatAnthropic. Ignored (CLI uses its own auth)."""
+    api_key: str | None = None
+    """Accepted for ChatAnthropic compat. Ignored (CLI auth)."""
 
-    anthropic_api_key: Optional[str] = None
-    """Accepted for drop-in compat with ChatAnthropic. Ignored (CLI uses its own auth)."""
+    anthropic_api_key: str | None = None
+    """Accepted for ChatAnthropic compat. Ignored (CLI auth)."""
 
     # ── Extended thinking ────────────────────────────────────
 
-    thinking: Optional[dict[str, Any]] = None
+    thinking: dict[str, Any] | None = None
     """Extended thinking config. E.g. {"type": "enabled", "budget_tokens": 5000}."""
 
-    effort: Optional[Literal["high", "medium", "low"]] = None
+    effort: Literal["high", "medium", "low"] | None = None
     """Effort level for the session (maps to Claude Code --effort flag)."""
 
     # ── Claude Code specific ─────────────────────────────────
 
-    system_prompt: Optional[str] = None
+    system_prompt: str | None = None
     """System prompt override."""
 
-    permission_mode: Optional[
-        Literal["default", "acceptEdits", "plan", "bypassPermissions"]
-    ] = None
+    permission_mode: (
+        Literal["default", "acceptEdits", "plan", "bypassPermissions"] | None
+    ) = None
     """Permission mode for the CLI."""
 
-    cli_path: Optional[str] = None
+    cli_path: str | None = None
     """Path to claude CLI binary."""
 
-    max_turns: Optional[int] = None
+    max_turns: int | None = None
     """Maximum conversation turns. Defaults to 1 (text-only, no tool execution).
     Set higher (e.g. 5-10) to enable agentic mode where Claude Code can use
     its built-in tools (Read, Write, Edit, Bash, Glob, Grep, etc.)."""
 
-    cwd: Optional[str] = None
+    cwd: str | None = None
     """Working directory for the CLI. Controls where file operations happen."""
 
-    allowed_tools: Optional[List[Union[str, ClaudeTool]]] = None
+    allowed_tools: list[str | ClaudeTool] | None = None
     """Whitelist of Claude Code tools the agent can use.
     Accepts strings or ClaudeTool enum values. E.g. [ClaudeTool.READ, ClaudeTool.GLOB]
     for read-only access. When None, all tools are available (if max_turns > 1)."""
 
-    disallowed_tools: Optional[List[Union[str, ClaudeTool]]] = None
+    disallowed_tools: list[str | ClaudeTool] | None = None
     """Blacklist of Claude Code tools. Accepts strings or ClaudeTool enum values."""
 
-    session_id: Optional[str] = None
+    session_id: str | None = None
     """Session ID for resuming a previous conversation."""
 
     # ── Internal state ───────────────────────────────────────
 
-    _bound_tools: Optional[list[dict]] = None
-    _last_result: Optional[Any] = None  # Stores last ResultMessage
+    _bound_tools: list[dict] | None = None
+    _last_result: Any | None = None  # Stores last ResultMessage
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -396,13 +390,13 @@ class ChatClaudeCode(BaseChatModel):
 
     def bind_tools(
         self,
-        tools: Sequence[Union[dict, type, BaseTool]],
+        tools: Sequence[dict | type | BaseTool],
         *,
-        tool_choice: Optional[Union[str, dict]] = None,
-        parallel_tool_calls: Optional[bool] = None,
-        strict: Optional[bool] = None,
+        tool_choice: str | dict | None = None,
+        parallel_tool_calls: bool | None = None,
+        strict: bool | None = None,
         **kwargs: Any,
-    ) -> "ChatClaudeCode":
+    ) -> ChatClaudeCode:
         """Bind tools to the model (like ChatAnthropic.bind_tools).
 
         Note: Tool calling is implemented by injecting tool schemas into the
@@ -425,9 +419,7 @@ class ChatClaudeCode(BaseChatModel):
 
     # ── enable_tools helper ──────────────────────────────────
 
-    def enable_tools(
-        self, tools: List[Union[str, ClaudeTool]]
-    ) -> "ChatClaudeCode":
+    def enable_tools(self, tools: list[str | ClaudeTool]) -> ChatClaudeCode:
         """Return a copy with additional allowed tools.
 
         Args:
@@ -442,7 +434,7 @@ class ChatClaudeCode(BaseChatModel):
 
     # ── Build SDK options ────────────────────────────────────
 
-    def _get_session_id(self, config: Optional[RunnableConfig] = None) -> Optional[str]:
+    def _get_session_id(self, config: RunnableConfig | None = None) -> str | None:
         """Extract session_id from config or fall back to instance field."""
         if config:
             configurable = config.get("configurable", {})
@@ -455,7 +447,7 @@ class ChatClaudeCode(BaseChatModel):
         self,
         *,
         partial_messages: bool = False,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
     ) -> Any:
         """Build ClaudeCodeOptions from model params."""
         from claude_code_sdk import ClaudeCodeOptions
@@ -474,7 +466,7 @@ class ChatClaudeCode(BaseChatModel):
         )
 
         if self.permission_mode:
-            options.permission_mode = self.permission_mode  # type: ignore
+            options.permission_mode = self.permission_mode  # type: ignore[assignment]
 
         if self.cwd:
             options.cwd = self.cwd
@@ -512,7 +504,7 @@ class ChatClaudeCode(BaseChatModel):
         else:
             options.system_prompt = tool_instruction
 
-    def _build_prompt(self, messages: List[BaseMessage]) -> tuple[Any, Any, bool]:
+    def _build_prompt(self, messages: list[BaseMessage]) -> tuple[Any, Any, bool]:
         """Build prompt and options from messages.
 
         Returns (prompt_arg, options, is_streaming_input).
@@ -527,13 +519,14 @@ class ChatClaudeCode(BaseChatModel):
         thinking_instruction = ""
         if self.thinking and self.thinking.get("type") == "enabled":
             budget = self.thinking.get("budget_tokens", 5000)
-            thinking_instruction = f"\n\n[Think step by step. Budget: {budget} tokens for thinking.]"
+            thinking_instruction = (
+                f"\n\n[Think step by step. Budget: {budget} tokens for thinking.]"
+            )
 
         if has_multimodal:
             return api_messages, options, True
-        else:
-            prompt = _build_prompt_string(api_messages) + thinking_instruction
-            return prompt, options, False
+        prompt = _build_prompt_string(api_messages) + thinking_instruction
+        return prompt, options, False
 
     # ── Process SDK messages ─────────────────────────────────
 
@@ -577,18 +570,16 @@ class ChatClaudeCode(BaseChatModel):
 
     def _generate(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
         """Generate a response via Claude Code CLI."""
         try:
             from claude_code_sdk import query as claude_query
         except ImportError:
-            raise ImportError(
-                "claude-code-sdk is required. Install with: pip install claude-code-sdk"
-            )
+            raise ImportError(_SDK_IMPORT_ERR)
 
         system, api_messages, has_multimodal = _convert_messages(messages)
         session_id = self._get_session_id(kwargs.get("config"))
@@ -603,12 +594,15 @@ class ChatClaudeCode(BaseChatModel):
         thinking_instruction = ""
         if self.thinking and self.thinking.get("type") == "enabled":
             budget = self.thinking.get("budget_tokens", 5000)
-            thinking_instruction = f"\n\n[Think step by step. Budget: {budget} tokens for thinking.]"
+            thinking_instruction = (
+                f"\n\n[Think step by step. Budget: {budget} tokens for thinking.]"
+            )
 
         collected: list[Any] = []
 
         async def _run() -> None:
             if has_multimodal:
+
                 async def _input_stream() -> AsyncIterator[dict[str, Any]]:
                     for msg in api_messages:
                         yield {
@@ -624,12 +618,11 @@ class ChatClaudeCode(BaseChatModel):
                 prompt = _build_prompt_string(api_messages) + thinking_instruction
                 stream = claude_query(prompt=prompt, options=options)
 
-            async for msg in stream:
-                collected.append(msg)
+            collected.extend([msg async for msg in stream])
 
         _run_sync(_run())
 
-        text, thinking_parts, gen_info = self._process_sdk_messages(collected)
+        text, _thinking_parts, gen_info = self._process_sdk_messages(collected)
 
         # Parse tool calls from response if tools are bound
         ai_msg = AIMessage(content=text)
@@ -637,15 +630,14 @@ class ChatClaudeCode(BaseChatModel):
             try:
                 parsed = json.loads(text)
                 if isinstance(parsed, dict) and "tool_calls" in parsed:
-                    tool_calls = []
-                    for tc in parsed["tool_calls"]:
-                        tool_calls.append(
-                            {
-                                "name": tc["name"],
-                                "args": tc.get("args", {}),
-                                "id": tc.get("id", f"call_{hash(tc['name'])}"),
-                            }
-                        )
+                    tool_calls = [
+                        {
+                            "name": tc["name"],
+                            "args": tc.get("args", {}),
+                            "id": tc.get("id", f"call_{hash(tc['name'])}"),
+                        }
+                        for tc in parsed["tool_calls"]
+                    ]
                     ai_msg = AIMessage(content=text, tool_calls=tool_calls)
             except (json.JSONDecodeError, KeyError):
                 pass
@@ -656,18 +648,16 @@ class ChatClaudeCode(BaseChatModel):
 
     async def _agenerate(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[Any] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any | None = None,
         **kwargs: Any,
     ) -> ChatResult:
         """Async generate a response via Claude Code CLI."""
         try:
             from claude_code_sdk import query as claude_query
         except ImportError:
-            raise ImportError(
-                "claude-code-sdk is required. Install with: pip install claude-code-sdk"
-            )
+            raise ImportError(_SDK_IMPORT_ERR)
 
         system, api_messages, has_multimodal = _convert_messages(messages)
         session_id = self._get_session_id(kwargs.get("config"))
@@ -681,11 +671,14 @@ class ChatClaudeCode(BaseChatModel):
         thinking_instruction = ""
         if self.thinking and self.thinking.get("type") == "enabled":
             budget = self.thinking.get("budget_tokens", 5000)
-            thinking_instruction = f"\n\n[Think step by step. Budget: {budget} tokens for thinking.]"
+            thinking_instruction = (
+                f"\n\n[Think step by step. Budget: {budget} tokens for thinking.]"
+            )
 
         collected: list[Any] = []
 
         if has_multimodal:
+
             async def _input_stream() -> AsyncIterator[dict[str, Any]]:
                 for msg in api_messages:
                     yield {
@@ -701,25 +694,23 @@ class ChatClaudeCode(BaseChatModel):
             prompt = _build_prompt_string(api_messages) + thinking_instruction
             stream = claude_query(prompt=prompt, options=options)
 
-        async for msg in stream:
-            collected.append(msg)
+        collected = [msg async for msg in stream]
 
-        text, thinking_parts, gen_info = self._process_sdk_messages(collected)
+        text, _thinking_parts, gen_info = self._process_sdk_messages(collected)
 
         ai_msg = AIMessage(content=text)
         if self._bound_tools and text:
             try:
                 parsed = json.loads(text)
                 if isinstance(parsed, dict) and "tool_calls" in parsed:
-                    tool_calls = []
-                    for tc in parsed["tool_calls"]:
-                        tool_calls.append(
-                            {
-                                "name": tc["name"],
-                                "args": tc.get("args", {}),
-                                "id": tc.get("id", f"call_{hash(tc['name'])}"),
-                            }
-                        )
+                    tool_calls = [
+                        {
+                            "name": tc["name"],
+                            "args": tc.get("args", {}),
+                            "id": tc.get("id", f"call_{hash(tc['name'])}"),
+                        }
+                        for tc in parsed["tool_calls"]
+                    ]
                     ai_msg = AIMessage(content=text, tool_calls=tool_calls)
             except (json.JSONDecodeError, KeyError):
                 pass
@@ -732,9 +723,9 @@ class ChatClaudeCode(BaseChatModel):
 
     def _stream(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
         """Stream response tokens as they arrive.
@@ -745,15 +736,11 @@ class ChatClaudeCode(BaseChatModel):
             from claude_code_sdk import query as claude_query
             from claude_code_sdk.types import StreamEvent
         except ImportError:
-            raise ImportError(
-                "claude-code-sdk is required. Install with: pip install claude-code-sdk"
-            )
+            raise ImportError(_SDK_IMPORT_ERR)
 
         system, api_messages, has_multimodal = _convert_messages(messages)
         session_id = self._get_session_id(kwargs.get("config"))
-        options = self._build_options(
-            partial_messages=True, session_id=session_id
-        )
+        options = self._build_options(partial_messages=True, session_id=session_id)
 
         if system:
             options.system_prompt = system
@@ -767,6 +754,7 @@ class ChatClaudeCode(BaseChatModel):
         async def _run() -> None:
             try:
                 if has_multimodal:
+
                     async def _input_stream() -> AsyncIterator[dict[str, Any]]:
                         for msg in api_messages:
                             yield {
@@ -781,9 +769,7 @@ class ChatClaudeCode(BaseChatModel):
                 else:
                     prompt_arg = _build_prompt_string(api_messages)
 
-                async for msg in claude_query(
-                    prompt=prompt_arg, options=options
-                ):
+                async for msg in claude_query(prompt=prompt_arg, options=options):
                     if isinstance(msg, StreamEvent):
                         event = msg.event
                         if isinstance(event, dict):
@@ -794,7 +780,7 @@ class ChatClaudeCode(BaseChatModel):
                                 if text:
                                     chunk_queue.put(text)
                     else:
-                        # AssistantMessage or ResultMessage — collect for post-processing
+                        # AssistantMessage or ResultMessage
                         from claude_code_sdk import ResultMessage
 
                         if isinstance(msg, ResultMessage):
@@ -804,9 +790,7 @@ class ChatClaudeCode(BaseChatModel):
             finally:
                 chunk_queue.put(_DONE)
 
-        thread = threading.Thread(
-            target=lambda: asyncio.run(_run()), daemon=True
-        )
+        thread = threading.Thread(target=lambda: asyncio.run(_run()), daemon=True)
         thread.start()
 
         while True:
@@ -824,26 +808,22 @@ class ChatClaudeCode(BaseChatModel):
 
     async def _astream(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[Any] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Async stream response tokens."""
         try:
-            from claude_code_sdk import query as claude_query
             from claude_code_sdk import ResultMessage
+            from claude_code_sdk import query as claude_query
             from claude_code_sdk.types import StreamEvent
         except ImportError:
-            raise ImportError(
-                "claude-code-sdk is required. Install with: pip install claude-code-sdk"
-            )
+            raise ImportError(_SDK_IMPORT_ERR)
 
         system, api_messages, has_multimodal = _convert_messages(messages)
         session_id = self._get_session_id(kwargs.get("config"))
-        options = self._build_options(
-            partial_messages=True, session_id=session_id
-        )
+        options = self._build_options(partial_messages=True, session_id=session_id)
 
         if system:
             options.system_prompt = system
@@ -851,6 +831,7 @@ class ChatClaudeCode(BaseChatModel):
         self._inject_tool_system_prompt(options)
 
         if has_multimodal:
+
             async def _input_stream() -> AsyncIterator[dict[str, Any]]:
                 for msg in api_messages:
                     yield {

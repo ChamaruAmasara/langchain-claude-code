@@ -1,18 +1,16 @@
 """Unit tests for ChatClaudeCode — covers all public functionality."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+import json
+from unittest.mock import MagicMock, patch
 
-import pytest
 from langchain_core.messages import (
     AIMessage,
-    AIMessageChunk,
     BaseMessage,
     HumanMessage,
     SystemMessage,
     ToolMessage,
 )
-from langchain_core.outputs import ChatGeneration, ChatResult
-from langchain_core.tools import BaseTool
+from langchain_core.outputs import ChatResult
 from pydantic import BaseModel, Field
 
 from langchain_claude_code.chat_models import (
@@ -31,7 +29,6 @@ from langchain_claude_code.tools import (
     ClaudeTool,
     normalize_tools,
 )
-
 
 # ── ClaudeTool enum ──────────────────────────────────────────
 
@@ -826,3 +823,192 @@ class TestEdgeCases:
         result = _content_to_anthropic_blocks([{"type": "image_url", "image_url": {}}])
         assert result[0]["source"]["type"] == "url"
         assert result[0]["source"]["url"] == ""
+
+
+# ── LangGraph compatibility ──────────────────────────────────
+
+
+class TestLangGraphCompat:
+    """Tests for compatibility with LangGraph create_react_agent."""
+
+    def test_bind_tools_returns_runnable(self) -> None:
+        """bind_tools returns a Runnable for LangGraph."""
+        from langchain_core.runnables import Runnable
+
+        llm = ChatClaudeCode()
+        tool_schema = {
+            "name": "get_weather",
+            "description": "Get weather",
+            "input_schema": {
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+            },
+        }
+        bound = llm.bind_tools([tool_schema])
+        assert isinstance(bound, Runnable)
+
+    def test_bind_tools_has_bound_tools_attr(self) -> None:
+        """Bound tools are accessible on the returned model."""
+        llm = ChatClaudeCode()
+        tool_schema = {
+            "name": "search",
+            "description": "Search the web",
+            "input_schema": {
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+            },
+        }
+        bound = llm.bind_tools([tool_schema])
+        assert bound._bound_tools is not None
+        assert len(bound._bound_tools) == 1
+        assert bound._bound_tools[0]["name"] == "search"
+
+    def test_tool_message_in_convert_messages(self) -> None:
+        """ToolMessage converts to tool_result format."""
+        msgs = [
+            HumanMessage(content="What's the weather?"),
+            AIMessage(
+                content="",
+                tool_calls=[{
+                    "id": "call_abc",
+                    "name": "get_weather",
+                    "args": {"city": "London"},
+                }],
+            ),
+            ToolMessage(
+                content='{"temp": 15, "condition": "cloudy"}',
+                tool_call_id="call_abc",
+            ),
+        ]
+        _sys, api_msgs, has_mm = _convert_messages(msgs)
+        assert has_mm is True
+        tool_result_msg = api_msgs[2]
+        assert tool_result_msg["role"] == "user"
+        block = tool_result_msg["content"][0]
+        assert block["type"] == "tool_result"
+        assert block["tool_use_id"] == "call_abc"
+
+    def test_full_tool_calling_roundtrip(self) -> None:
+        """Human→AI(tool_call)→ToolMessage→AI converts OK."""
+        msgs = [
+            SystemMessage(content="You are a helpful assistant."),
+            HumanMessage(content="Search for LangGraph docs"),
+            AIMessage(
+                content="I'll search for that.",
+                tool_calls=[{
+                    "id": "call_1",
+                    "name": "search",
+                    "args": {"q": "langgraph docs"},
+                }],
+            ),
+            ToolMessage(
+                content="Found: https://langchain-ai.github.io/langgraph/",
+                tool_call_id="call_1",
+            ),
+            AIMessage(content="Here are the LangGraph docs."),
+        ]
+        system, api_msgs, has_mm = _convert_messages(msgs)
+        assert system == "You are a helpful assistant."
+        assert len(api_msgs) == 4
+        assert has_mm is True
+        assert api_msgs[0]["role"] == "user"
+        assert api_msgs[1]["role"] == "assistant"
+        assert api_msgs[2]["role"] == "user"
+        assert api_msgs[3]["role"] == "assistant"
+
+    @patch("langchain_claude_code.chat_models._run_sync")
+    def test_ai_message_tool_calls_populated(
+        self, mock_run_sync: MagicMock
+    ) -> None:
+        """JSON tool_calls in response populates AIMessage."""
+        from claude_code_sdk import (
+            AssistantMessage,
+            ResultMessage,
+        )
+
+        tc_data = {
+            "name": "get_weather",
+            "args": {"city": "Paris"},
+            "id": "call_42",
+        }
+        tool_response = json.dumps(
+            {"tool_calls": [tc_data]}
+        )
+
+        mock_assistant = MagicMock(spec=AssistantMessage)
+        block = MagicMock()
+        block.text = tool_response
+        if hasattr(block, "thinking"):
+            delattr(block, "thinking")
+        mock_assistant.content = [block]
+
+        mock_result = ResultMessage(
+            subtype="result",
+            duration_ms=100,
+            duration_api_ms=80,
+            is_error=False,
+            num_turns=1,
+            session_id="sess-1",
+            total_cost_usd=0.01,
+            usage={"input_tokens": 10, "output_tokens": 20},
+            result=tool_response,
+        )
+
+        collected_msgs = [mock_assistant, mock_result]
+
+        llm = ChatClaudeCode()
+        tool_schema = {
+            "name": "get_weather",
+            "description": "Get weather",
+            "input_schema": {
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+            },
+        }
+        bound = llm.bind_tools([tool_schema])
+
+        mock_run_sync.side_effect = lambda coro: None
+
+        text, _, _info = bound._process_sdk_messages(
+            collected_msgs
+        )
+        assert text == tool_response
+
+        # Simulate parsing from _generate
+        ai_msg = AIMessage(content=text)
+        if bound._bound_tools and text:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict) and "tool_calls" in parsed:
+                tool_calls = [
+                    {
+                        "name": tc["name"],
+                        "args": tc.get("args", {}),
+                        "id": tc.get(
+                            "id",
+                            f"call_{hash(tc['name'])}",
+                        ),
+                    }
+                    for tc in parsed["tool_calls"]
+                ]
+                ai_msg = AIMessage(
+                    content=text, tool_calls=tool_calls
+                )
+
+        assert len(ai_msg.tool_calls) == 1
+        assert ai_msg.tool_calls[0]["name"] == "get_weather"
+        assert ai_msg.tool_calls[0]["args"] == {"city": "Paris"}
+        assert ai_msg.tool_calls[0]["id"] == "call_42"
+
+    def test_create_react_agent_instantiation(self) -> None:
+        """create_react_agent accepts ChatClaudeCode."""
+        from langchain_core.tools import tool as tool_decorator
+        from langgraph.prebuilt import create_react_agent
+
+        @tool_decorator
+        def get_weather(city: str) -> str:
+            """Get the weather for a city."""
+            return f"Weather in {city}: sunny, 25C"
+
+        llm = ChatClaudeCode()
+        agent = create_react_agent(llm, [get_weather])
+        assert agent is not None

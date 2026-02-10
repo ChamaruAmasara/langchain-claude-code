@@ -14,7 +14,7 @@ import asyncio
 import json
 import queue
 import threading
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from typing import (
     Any,
     Literal,
@@ -33,7 +33,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
-from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 
 from langchain_claude_code.tools import ClaudeTool, normalize_tools
@@ -167,27 +167,28 @@ def _build_prompt_string(api_messages: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def _tool_to_anthropic_schema(tool: BaseTool | dict | type) -> dict:
+def _tool_to_anthropic_schema(
+    tool: BaseTool | dict[str, Any] | type | Callable[..., Any],
+) -> dict[str, Any]:
     """Convert a LangChain tool to Anthropic tool schema."""
     if isinstance(tool, dict):
         return tool
-    if isinstance(tool, type):
-        schema = tool.model_json_schema() if hasattr(tool, "model_json_schema") else {}
+    if isinstance(tool, BaseTool):
+        input_schema: dict[str, Any] = {"type": "object", "properties": {}}
+        if tool.args_schema and hasattr(tool.args_schema, "model_json_schema"):
+            input_schema = tool.args_schema.model_json_schema()
         return {
-            "name": tool.__name__,
-            "description": tool.__doc__ or "",
-            "input_schema": schema,
+            "name": tool.name,
+            "description": tool.description or "",
+            "input_schema": input_schema,
         }
-    # BaseTool instance
-    return {
-        "name": tool.name,
-        "description": tool.description or "",
-        "input_schema": (
-            tool.args_schema.model_json_schema()
-            if tool.args_schema
-            else {"type": "object", "properties": {}}
-        ),
-    }
+    # type (Pydantic model) or Callable
+    name = getattr(tool, "__name__", str(tool))
+    desc = getattr(tool, "__doc__", "") or ""
+    schema: dict[str, Any] = {}
+    if hasattr(tool, "model_json_schema"):
+        schema = tool.model_json_schema()
+    return {"name": name, "description": desc, "input_schema": schema}
 
 
 # ── Async runner ─────────────────────────────────────────────
@@ -202,13 +203,13 @@ def _run_sync(coro: Any) -> Any:
 
     if loop and loop.is_running():
         # We're inside an existing event loop — run in a separate thread
-        result = [None]
-        exc = [None]
+        result: list[Any] = [None]
+        exc: list[BaseException | None] = [None]
 
         def _thread_target() -> None:
             try:
                 result[0] = asyncio.run(coro)
-            except Exception as e:
+            except BaseException as e:
                 exc[0] = e
 
         t = threading.Thread(target=_thread_target, daemon=True)
@@ -390,13 +391,11 @@ class ChatClaudeCode(BaseChatModel):
 
     def bind_tools(
         self,
-        tools: Sequence[dict | type | BaseTool],
+        tools: Sequence[dict[str, Any] | type | Callable[..., Any] | BaseTool],
         *,
-        tool_choice: str | dict | None = None,
-        parallel_tool_calls: bool | None = None,
-        strict: bool | None = None,
+        tool_choice: str | None = None,
         **kwargs: Any,
-    ) -> ChatClaudeCode:
+    ) -> Runnable:
         """Bind tools to the model (like ChatAnthropic.bind_tools).
 
         Note: Tool calling is implemented by injecting tool schemas into the
@@ -466,7 +465,7 @@ class ChatClaudeCode(BaseChatModel):
         )
 
         if self.permission_mode:
-            options.permission_mode = self.permission_mode  # type: ignore[assignment]
+            options.permission_mode = self.permission_mode
 
         if self.cwd:
             options.cwd = self.cwd
